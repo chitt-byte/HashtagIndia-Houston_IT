@@ -30,7 +30,6 @@
     min-height: 100vh;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    overflow: hidden;
   }
 
   /* ── LEFT PANEL ── */
@@ -159,7 +158,10 @@
     background: var(--surface);
     border-left: 1px solid var(--border);
     overflow-y: auto;
+    overflow-x: hidden;
     position: relative;
+    /* Ensure children never get clipped */
+    min-height: 100vh;
   }
 
   .upload-panel::before {
@@ -385,13 +387,152 @@
   .footer-text { font-size: 10px; color: var(--text-muted); letter-spacing: 0.08em; }
 
   @media (max-width: 768px) {
-    body { grid-template-columns: 1fr; }
-    .visual-panel { min-height: 260px; }
-    .upload-panel { padding: 36px 24px; }
+    body {
+      grid-template-columns: 1fr;
+      /* Stack vertically, scroll freely */
+      overflow-y: auto;
+      overflow-x: hidden;
+      height: auto;
+    }
+
+    /* Shrink the food image panel on mobile */
+    .visual-panel { min-height: 200px; max-height: 220px; }
+    .brand-overlay { padding: 24px 20px; }
+    .hashtag-mark { font-size: 48px; }
+    .brand-name { font-size: 20px; }
+    .food-grid { height: 100px; }
+    .spice-dots { display: none; }
+
+    /* Upload panel: natural height, no overflow hidden */
+    .upload-panel {
+      padding: 28px 20px 40px;
+      min-height: auto;
+      overflow: visible;
+    }
+
+    /* Drop zone smaller on mobile */
+    .drop-zone { padding: 28px 16px; }
+    .drop-emoji { font-size: 28px; }
+
+    /* Log panel shorter */
+    .log-panel { min-height: 60px; max-height: 100px; }
+
+    /* Button always fully visible */
+    .btn-submit {
+      margin-top: 16px;
+      padding: 18px;
+      font-size: 16px;
+      position: relative;
+      /* Ensure it's never clipped */
+      z-index: 10;
+    }
+
+    .panel-footer { margin-top: 20px; margin-bottom: 8px; }
+
+    /* Settings drawer full width on mobile */
+    .settings-drawer {
+      width: calc(100vw - 32px);
+      right: 16px;
+    }
+
+    /* Gear button visible above food image */
+    .gear-btn { top: 12px; right: 12px; }
   }
+
+  /* ── SETTINGS GEAR ── */
+  .gear-btn {
+    position: fixed;
+    top: 16px; right: 16px;
+    width: 36px; height: 36px;
+    background: rgba(245,166,35,0.15);
+    border: 1px solid rgba(245,166,35,0.3);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; z-index: 200;
+    transition: all 0.2s;
+    font-size: 16px;
+  }
+  .gear-btn:hover { background: rgba(245,166,35,0.3); transform: rotate(30deg); }
+
+  .settings-drawer {
+    position: fixed;
+    top: 60px; right: 16px;
+    background: #1a1510;
+    border: 1px solid #4a3828;
+    padding: 16px;
+    width: 300px;
+    z-index: 199;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    animation: slideDown 0.2s ease;
+  }
+
+  @keyframes slideDown {
+    from { opacity:0; transform:translateY(-8px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+
+  .settings-drawer.open { display: flex; }
+
+  .settings-title {
+    font-size: 10px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .settings-label {
+    font-size: 10px; color: var(--text-muted);
+    margin-bottom: 4px; display: block;
+  }
+
+  .settings-input {
+    width: 100%;
+    background: #0c0a08;
+    border: 1px solid #4a3828;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    padding: 8px 10px;
+    outline: none;
+  }
+  .settings-input:focus { border-color: var(--accent); }
+
+  .settings-status {
+    font-size: 10px; color: var(--text-muted);
+    min-height: 14px;
+  }
+  .settings-status.ok  { color: var(--success); }
+  .settings-status.err { color: var(--error); }
+
+  .settings-save {
+    background: var(--accent); color: #0c0a08;
+    border: none; font-family: 'DM Mono', monospace;
+    font-size: 11px; font-weight: 500;
+    padding: 8px; cursor: pointer;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    transition: background 0.15s;
+  }
+  .settings-save:hover { background: #f7b84a; }
+
 </style>
 </head>
 <body>
+
+
+<!-- SETTINGS GEAR -->
+<button class="gear-btn" id="gearBtn" title="Settings">⚙</button>
+<div class="settings-drawer" id="settingsDrawer">
+  <div class="settings-title">⚙ Connection Settings</div>
+  <div>
+    <label class="settings-label">Webhook URL (ngrok / tunnel)</label>
+    <input class="settings-input" id="settingsUrl" type="url"
+      placeholder="https://abc123.ngrok-free.app/webhook/invoice">
+  </div>
+  <div class="settings-status" id="settingsStatus"></div>
+  <button class="settings-save" id="settingsSave">Save & Use This URL</button>
+</div>
 
 <!-- LEFT -->
 <div class="visual-panel">
@@ -477,7 +618,54 @@
 </div>
 
 <script>
-  const WEBHOOK_URL = document.getElementById('webhookUrl').value;
+  // ── Webhook URL: reads from localStorage, falls back to hardcoded ──
+  const HARDCODED_URL = document.getElementById('webhookUrl').value;
+  let WEBHOOK_URL = localStorage.getItem('hi_webhook_url') || HARDCODED_URL;
+
+  // ── Settings Gear ──
+  const gearBtn        = document.getElementById('gearBtn');
+  const settingsDrawer = document.getElementById('settingsDrawer');
+  const settingsUrl    = document.getElementById('settingsUrl');
+  const settingsStatus = document.getElementById('settingsStatus');
+  const settingsSave   = document.getElementById('settingsSave');
+
+  // Pre-fill with saved URL
+  settingsUrl.value = WEBHOOK_URL;
+
+  gearBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    settingsDrawer.classList.toggle('open');
+    if (settingsDrawer.classList.contains('open')) {
+      settingsUrl.value = WEBHOOK_URL;
+      settingsStatus.textContent = '';
+      settingsStatus.className = 'settings-status';
+    }
+  });
+
+  document.addEventListener('click', e => {
+    if (!settingsDrawer.contains(e.target) && e.target !== gearBtn) {
+      settingsDrawer.classList.remove('open');
+    }
+  });
+
+  settingsSave.addEventListener('click', () => {
+    const val = settingsUrl.value.trim();
+    if (!val) {
+      settingsStatus.textContent = '✗ Please enter a URL.';
+      settingsStatus.className = 'settings-status err';
+      return;
+    }
+    if (!val.startsWith('http')) {
+      settingsStatus.textContent = '✗ URL must start with http or https.';
+      settingsStatus.className = 'settings-status err';
+      return;
+    }
+    WEBHOOK_URL = val;
+    localStorage.setItem('hi_webhook_url', val);
+    settingsStatus.textContent = '✓ Saved! Using this URL now.';
+    settingsStatus.className = 'settings-status ok';
+    setTimeout(() => settingsDrawer.classList.remove('open'), 1200);
+  });
 
   const dropZone    = document.getElementById('dropZone');
   const fileInput   = document.getElementById('fileInput');
